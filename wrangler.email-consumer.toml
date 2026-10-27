@@ -1,4 +1,4 @@
-name = "sa-bpo-calculator-email"
+name = "sa-bpo-calculator-email-consumer"
 main = "workers/calculator-email-consumer.ts"
 compatibility_date = "2026-10-27"
 
@@ -9,7 +9,7 @@ database_id = "b438ac63-95a4-4110-922a-a64ac70dff66"
 migrations_dir = "migrations"
 
 [[queues.consumers]]
-queue = "sa-bpo-calculator-emails"
+queue = "sa-bpo-calculator-email"
 max_batch_size = 10
 max_batch_timeout = 30
 max_retries = 5

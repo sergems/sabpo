@@ -40,13 +40,13 @@ npx wrangler d1 migrations apply sa-bpo-calculator --remote --config wrangler.em
 ## 2. Create the Queue
 
 ```bash
-npx wrangler queues create sa-bpo-calculator-emails
+npx wrangler queues create sa-bpo-calculator-email
 ```
 
 The queue name must be exactly:
 
 ```text
-sa-bpo-calculator-emails
+sa-bpo-calculator-email
 ```
 
 ## 3. Deploy the email consumer Worker
@@ -82,7 +82,7 @@ In Cloudflare Dashboard:
    - Database: `sa-bpo-calculator`
 5. Add a **Queue producer binding**:
    - Variable name: `CALCULATOR_EMAIL_QUEUE`
-   - Queue: `sa-bpo-calculator-emails`
+   - Queue: `sa-bpo-calculator-email`
 6. Save the bindings.
 7. Trigger a new Pages deployment from `main`.
 
