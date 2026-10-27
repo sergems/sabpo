@@ -3,6 +3,7 @@ import { ArrowRight, CheckCircle2, ChevronDown, Mail, ShieldCheck, Sparkles, X }
 import { getCountries, getCountryCallingCode, parsePhoneNumber, type Country } from "react-phone-number-input";
 import countryFlags from "react-phone-number-input/flags";
 import { calculateBpoEstimate, MONTHLY_HOURS, serviceOptions, type Currency } from "../../../shared/bpo-estimate";
+import { beaconIntake, enqueueIntake, removeIntake } from "@/lib/calculator-outbox";
 
 type LeadData = {
   firstName: string;
@@ -184,6 +185,9 @@ export default function BpoCalculatorModal({ onClose }: Props) {
   const [countrySearch, setCountrySearch] = useState("");
   const phoneCountryPickerRef = useRef<HTMLDivElement>(null);
   const closeCalculatorRef = useRef<() => void>(() => onClose());
+  const latestPayloadRef = useRef<Record<string, unknown> | null>(null);
+  const currentSubmissionIdRef = useRef<string | null>(null);
+  const currentPayloadFingerprintRef = useRef<string | null>(null);
   const sentEstimateSnapshotRef = useRef<string | null>(null);
   const estimateRequestRef = useRef<Promise<boolean> | null>(null);
   const [consent, setConsent] = useState(sessionSeed?.consent ?? false);
@@ -245,6 +249,55 @@ export default function BpoCalculatorModal({ onClose }: Props) {
       // Session persistence is an enhancement; the calculator remains usable without browser storage.
     }
   }, [step, draft, lead, phoneCountry, consent, previewOnly, currency, serviceId, advisors, moreThanThirty, largeAdvisorCount]);
+
+  useEffect(() => {
+    if (!consent) {
+      latestPayloadRef.current = null;
+      currentSubmissionIdRef.current = null;
+      currentPayloadFingerprintRef.current = null;
+      return;
+    }
+    const draftLead: LeadData = {
+      firstName: draft.firstName.trim(),
+      surname: draft.surname.trim(),
+      company: draft.company.trim(),
+      position: draft.position.trim(),
+      email: draft.email.trim().toLowerCase(),
+      telephone: draft.telephone.trim() ? toInternationalTelephone(draft.telephone, phoneCountry) : "",
+    };
+    const hasRequiredDetails = [draftLead.firstName, draftLead.surname, draftLead.company, draftLead.position, draftLead.email].every(Boolean)
+      && emailPattern.test(draftLead.email);
+    if (!hasRequiredDetails) {
+      latestPayloadRef.current = null;
+      currentSubmissionIdRef.current = null;
+      currentPayloadFingerprintRef.current = null;
+      return;
+    }
+    const nextPayload: Record<string, unknown> = {
+      ...(lead ?? draftLead),
+      consent: true,
+      website: draft.website,
+      ...(lead ? { calculator: { serviceId, currency, advisorCount: moreThanThirty ? Math.min(1000, Math.max(31, Math.round(Number(largeAdvisorCount) || 31))) : advisors, moreThanThirty } } : {}),
+    };
+    const fingerprint = JSON.stringify(nextPayload);
+    if (fingerprint !== currentPayloadFingerprintRef.current) {
+      currentPayloadFingerprintRef.current = fingerprint;
+      currentSubmissionIdRef.current = null;
+    }
+    latestPayloadRef.current = {
+      ...nextPayload,
+      ...(currentSubmissionIdRef.current ? { submissionId: currentSubmissionIdRef.current } : {}),
+    };
+  }, [consent, draft, lead, phoneCountry, serviceId, currency, advisors, moreThanThirty, largeAdvisorCount]);
+
+  useEffect(() => {
+    const handlePageHide = () => {
+      const payload = latestPayloadRef.current;
+      if (payload && !previewOnly) beaconIntake(payload);
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    return () => window.removeEventListener("pagehide", handlePageHide);
+  }, [previewOnly]);
 
   const advisorCount = moreThanThirty ? Math.min(1000, Math.max(31, Math.round(Number(largeAdvisorCount) || 31))) : advisors;
   const { selectedService, hourlyRate, monthlyPerAdvisor, monthlyTotal, tierLabel } = calculateBpoEstimate(currency, serviceId, advisorCount);
@@ -332,7 +385,9 @@ export default function BpoCalculatorModal({ onClose }: Props) {
       if (sendCopyToCustomer) setEstimateSendError("Calculator submission cannot be sent from this local preview because email delivery is not configured.");
       return !sendCopyToCustomer;
     }
-    const requestPayload = { ...payload, sendCopyToCustomer };
+    const requestPayload = enqueueIntake({ ...payload, sendCopyToCustomer });
+    currentSubmissionIdRef.current = requestPayload.submissionId;
+    if (latestPayloadRef.current) latestPayloadRef.current = { ...latestPayloadRef.current, submissionId: requestPayload.submissionId };
     const snapshot = JSON.stringify(requestPayload);
     if (sentEstimateSnapshotRef.current === snapshot) return true;
     if (estimateRequestRef.current) return estimateRequestRef.current;
@@ -353,10 +408,12 @@ export default function BpoCalculatorModal({ onClose }: Props) {
             setEstimateSendError("Calculator submission cannot be sent from this local preview because email delivery is not configured.");
             return false;
           }
+          removeIntake(requestPayload.submissionId);
           sentEstimateSnapshotRef.current = snapshot;
           return true;
         }
         if (!response.ok) throw new Error(result.error || "We couldn't send your estimate selections.");
+        removeIntake(requestPayload.submissionId);
         sentEstimateSnapshotRef.current = snapshot;
         return true;
       } catch {

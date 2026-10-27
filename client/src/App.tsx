@@ -9,6 +9,8 @@ import ContactUs from "./pages/ContactUs";
 import Home from "./pages/Home";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import PrivacyConsent from "./components/PrivacyConsent";
+import { flushIntakeOutbox } from "./lib/calculator-outbox";
+import { useEffect } from "react";
 
 
 function Router() {
@@ -31,6 +33,8 @@ function Router() {
 // - If you want to make theme switchable, pass `switchable` ThemeProvider and use `useTheme` hook
 
 function App() {
+  useEffect(() => { void flushIntakeOutbox(); }, []);
+
   return (
     <ErrorBoundary>
       <ThemeProvider

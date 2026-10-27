@@ -144,7 +144,28 @@ function emailDetailRow(label: string, value: string): string {
   </tr>`;
 }
 
-async function sendLeadEmail(
+export type ValidatedCalculatorIntake = {
+  lead: CalculatorLead;
+  calculator?: CalculatorSelection;
+  sendCopyToCustomer: boolean;
+};
+
+export function validateCalculatorIntake(body: unknown): ValidatedCalculatorIntake | null {
+  if (!isRecord(body) || body.consent !== true) return null;
+  const lead = readLead(body);
+  if (!lead) return null;
+  const hasCalculatorSelection = Object.prototype.hasOwnProperty.call(body, "calculator");
+  const calculator = hasCalculatorSelection ? readCalculatorSelection(body.calculator) : undefined;
+  if (calculator === null) return null;
+  const sendCopyToCustomer = body.sendCopyToCustomer === true;
+  if (
+    (Object.prototype.hasOwnProperty.call(body, "sendCopyToCustomer") && typeof body.sendCopyToCustomer !== "boolean") ||
+    (sendCopyToCustomer && !calculator)
+  ) return null;
+  return { lead, calculator, sendCopyToCustomer };
+}
+
+export async function sendLeadEmail(
   lead: CalculatorLead,
   env: CalculatorEmailEnvironment,
   calculator?: CalculatorSelection,
