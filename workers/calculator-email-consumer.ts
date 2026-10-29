@@ -25,11 +25,13 @@ type StoredPayload = {
 };
 type StoredRow = { id: string; payload: string; status: string; created_at: number };
 
-async function sendQueuedBrowserCloseDigest(env: WorkerEnv): Promise<number> {
+async function sendQueuedBrowserCloseDigest(env: WorkerEnv, includeRecent = false): Promise<number> {
   const cutoff = Date.now() - 60 * 60 * 1000;
+  const ageFilter = includeRecent ? "" : " AND created_at < ?";
+  const query = `SELECT id, payload, status, created_at FROM calculator_submissions WHERE status = 'queued'${ageFilter} ORDER BY created_at ASC LIMIT 100`;
   const result = await env.DB.prepare(
-    "SELECT id, payload, status, created_at FROM calculator_submissions WHERE status = 'queued' AND created_at < ? ORDER BY created_at ASC LIMIT 100",
-  ).bind(cutoff).all<StoredRow>();
+    query,
+  ).bind(...(includeRecent ? [] : [cutoff])).all<StoredRow>();
   if (result.results.length === 0) return 0;
 
   const claimed: Array<{ row: StoredRow; item: CalculatorDigestItem }> = [];
@@ -79,7 +81,7 @@ export default {
       return new Response("Unauthorized", { status: 401 });
     }
     try {
-      const count = await sendQueuedBrowserCloseDigest(env);
+      const count = await sendQueuedBrowserCloseDigest(env, true);
       return new Response(JSON.stringify({ ok: true, sent: count }), {
         headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
       });

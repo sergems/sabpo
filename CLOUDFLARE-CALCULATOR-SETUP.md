@@ -86,7 +86,7 @@ Include this request header:
 X-Digest-Trigger-Token: <the-value-you-saved-as-DIGEST_TRIGGER_TOKEN>
 ```
 
-The response reports how many queued submissions were sent. A response such as `{"ok":true,"sent":3}` means the three older queued rows were included and marked `sent`. The endpoint sends no email when there are no eligible queued rows.
+The manual endpoint sends every currently queued row immediately, including recent rows. The response reports how many queued submissions were sent. A response such as `{"ok":true,"sent":3}` means three queued rows were included and marked `sent`. The endpoint sends no email when there are no queued rows.
 
 ## 4. Configure Cloudflare Pages bindings
 
