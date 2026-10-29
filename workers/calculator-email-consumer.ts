@@ -72,23 +72,35 @@ async function sendQueuedBrowserCloseDigest(env: WorkerEnv, includeRecent = fals
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname !== "/admin/send-browser-close-digest" || request.method !== "POST") {
-      return new Response("Not found", { status: 404 });
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers": "X-Digest-Trigger-Token, Content-Type",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Cache-Control": "no-store",
+    };
+    if (url.pathname !== "/admin/send-browser-close-digest") {
+      return new Response("Not found", { status: 404, headers: corsHeaders });
+    }
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders });
+    }
+    if (request.method !== "POST") {
+      return new Response("Method not allowed", { status: 405, headers: corsHeaders });
     }
     const expectedToken = env.DIGEST_TRIGGER_TOKEN?.trim();
     const suppliedToken = request.headers.get("X-Digest-Trigger-Token")?.trim();
     if (!expectedToken || !suppliedToken || suppliedToken !== expectedToken) {
-      return new Response("Unauthorized", { status: 401 });
+      return new Response("Unauthorized", { status: 401, headers: corsHeaders });
     }
     try {
       const count = await sendQueuedBrowserCloseDigest(env, true);
       return new Response(JSON.stringify({ ok: true, sent: count }), {
-        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     } catch {
       return new Response(JSON.stringify({ ok: false, error: "Digest delivery failed" }), {
         status: 502,
-        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
   },
