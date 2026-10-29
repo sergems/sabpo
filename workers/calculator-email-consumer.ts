@@ -1,12 +1,21 @@
-import { sendLeadEmail, type CalculatorEmailEnvironment, type CalculatorLead, type CalculatorSelection } from "../shared/calculator-intake";
+import {
+  sendCalculatorDigestEmail,
+  sendLeadEmail,
+  type CalculatorEmailEnvironment,
+  type CalculatorDigestItem,
+  type CalculatorLead,
+  type CalculatorSelection,
+} from "../shared/calculator-intake";
 
+type D1Result = { meta?: { changes?: number } };
 type D1DatabaseLike = {
-  prepare: (query: string) => { bind: (...values: unknown[]) => { run: () => Promise<unknown>; all: <T>() => Promise<{ results: T[] }> } };
+  prepare: (query: string) => { bind: (...values: unknown[]) => { run: () => Promise<D1Result>; all: <T>() => Promise<{ results: T[] }> } };
 };
 
 type WorkerEnv = CalculatorEmailEnvironment & { DB: D1DatabaseLike };
 type QueueMessage = { submissionId: string };
 type QueueBatch = { messages: Array<{ body: QueueMessage; ack: () => void; retry: () => void }> };
+type ScheduledContext = { waitUntil: (promise: Promise<unknown>) => void };
 
 type StoredPayload = {
   submissionId: string;
@@ -14,8 +23,48 @@ type StoredPayload = {
   calculator: CalculatorSelection | null;
   sendCopyToCustomer: boolean;
 };
+type StoredRow = { id: string; payload: string; status: string; created_at: number };
 
-type StoredRow = { payload: string; status: string };
+async function sendQueuedBrowserCloseDigest(env: WorkerEnv): Promise<void> {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  const result = await env.DB.prepare(
+    "SELECT id, payload, status, created_at FROM calculator_submissions WHERE status = 'queued' AND created_at < ? ORDER BY created_at ASC LIMIT 100",
+  ).bind(cutoff).all<StoredRow>();
+  if (result.results.length === 0) return;
+
+  const claimed: Array<{ row: StoredRow; item: CalculatorDigestItem }> = [];
+  for (const row of result.results) {
+    const update = await env.DB.prepare(
+      "UPDATE calculator_submissions SET status = 'processing', attempts = attempts + 1 WHERE id = ? AND status = 'queued'",
+    ).bind(row.id).run();
+    if ((update.meta?.changes ?? 0) === 0) continue;
+    const payload = JSON.parse(row.payload) as StoredPayload;
+    claimed.push({
+      row,
+      item: {
+        submissionId: payload.submissionId,
+        lead: payload.lead,
+        calculator: payload.calculator ?? undefined,
+        createdAt: row.created_at,
+      },
+    });
+  }
+  if (claimed.length === 0) return;
+
+  try {
+    await sendCalculatorDigestEmail(claimed.map(({ item }) => item), env);
+    for (const { row } of claimed) {
+      await env.DB.prepare("UPDATE calculator_submissions SET status = 'sent', processed_at = ?, last_error = NULL WHERE id = ?")
+        .bind(Date.now(), row.id).run();
+    }
+  } catch {
+    for (const { row } of claimed) {
+      await env.DB.prepare("UPDATE calculator_submissions SET status = 'queued', last_error = ? WHERE id = ?")
+        .bind("Daily browser-close digest delivery failed; will retry", row.id).run();
+    }
+    throw new Error("Daily browser-close digest delivery failed");
+  }
+}
 
 export default {
   async queue(batch: QueueBatch, env: WorkerEnv): Promise<void> {
@@ -23,7 +72,7 @@ export default {
       const { submissionId } = message.body;
       try {
         const result = await env.DB.prepare("SELECT payload, status FROM calculator_submissions WHERE id = ?")
-          .bind(submissionId).all<StoredRow>();
+          .bind(submissionId).all<{ payload: string; status: string }>();
         const row = result.results[0];
         if (!row || row.status === "sent") {
           message.ack();
@@ -43,5 +92,9 @@ export default {
         message.retry();
       }
     }
+  },
+
+  async scheduled(_event: unknown, env: WorkerEnv, context: ScheduledContext): Promise<void> {
+    context.waitUntil(sendQueuedBrowserCloseDigest(env));
   },
 };

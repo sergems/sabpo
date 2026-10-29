@@ -302,6 +302,56 @@ export async function sendLeadEmail(
   }
 }
 
+export type CalculatorDigestItem = {
+  submissionId: string;
+  lead: CalculatorLead;
+  calculator?: CalculatorSelection;
+  createdAt: number;
+};
+
+export async function sendCalculatorDigestEmail(
+  items: CalculatorDigestItem[],
+  env: CalculatorEmailEnvironment,
+): Promise<void> {
+  const apiKey = env.RESEND_API_KEY?.trim();
+  if (!apiKey) throw new Error("Email service is not configured");
+  const receivedAt = new Intl.DateTimeFormat("en-ZA", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Africa/Johannesburg",
+  });
+  const text = [
+    `SA-BPO browser-close calculator report — ${items.length} ${items.length === 1 ? "visitor" : "visitors"}`,
+    "",
+    "These consented calculator enquiries were saved before the visitor closed the browser and are being delivered in the daily fallback report.",
+    "",
+    ...items.flatMap((item, index) => [
+      `${index + 1}. ${item.lead.firstName} ${item.lead.surname} — ${item.lead.company}`,
+      `   Position: ${item.lead.position}`,
+      `   Company email: ${item.lead.email}`,
+      `   Telephone: ${item.lead.telephone || "Not provided"}`,
+      ...(item.calculator ? [`   Service: ${serviceOptions.find((service) => service.id === item.calculator?.serviceId)?.label ?? item.calculator.serviceId}`, `   Advisors: ${item.calculator.advisorCount}`, `   Currency: ${item.calculator.currency}`] : ["   Calculator: Not completed"]),
+      `   Captured: ${receivedAt.format(new Date(item.createdAt))}`,
+      `   Submission ID: ${item.submissionId}`,
+      "",
+    ]),
+  ].join("\n");
+  const rows = items.map((item, index) => `<tr>
+    <td style="padding:12px 10px;border-bottom:1px solid #e8e7e1;color:#686963;font-size:13px;vertical-align:top;">${index + 1}</td>
+    <td style="padding:12px 10px;border-bottom:1px solid #e8e7e1;color:#0c0c0b;font-size:14px;vertical-align:top;"><strong>${escapeHtml(`${item.lead.firstName} ${item.lead.surname}`)}</strong><br>${escapeHtml(item.lead.company)}<br><span style="color:#686963;">${escapeHtml(item.lead.email)}</span></td>
+    <td style="padding:12px 10px;border-bottom:1px solid #e8e7e1;color:#0c0c0b;font-size:13px;vertical-align:top;">${escapeHtml(item.calculator ? serviceOptions.find((service) => service.id === item.calculator?.serviceId)?.label ?? item.calculator.serviceId : "Calculator not completed")}<br>${item.calculator ? `${item.calculator.advisorCount} advisors · ${item.calculator.currency}` : "Lead details only"}</td>
+    <td style="padding:12px 10px;border-bottom:1px solid #e8e7e1;color:#686963;font-size:12px;vertical-align:top;">${escapeHtml(receivedAt.format(new Date(item.createdAt)))}</td>
+  </tr>`).join("");
+  const html = `<!doctype html><html lang="en"><body style="margin:0;padding:28px;background:#f5f3ee;font-family:Arial,Helvetica,sans-serif;color:#0c0c0b;"><table role="presentation" width="100%" style="max-width:900px;margin:auto;background:#fffdfa;border:1px solid #e2e0d8;border-radius:16px;border-collapse:separate;overflow:hidden;"><tr><td style="padding:24px 28px;background:#005b3a;color:#fff;"><strong style="font-size:22px;">SA-BPO</strong><div style="margin-top:8px;color:#f7b719;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;">Browser-close calculator report</div></td></tr><tr><td style="padding:28px;"><h1 style="margin:0 0 10px;font-size:26px;">${items.length} ${items.length === 1 ? "visitor" : "visitors"} captured</h1><p style="margin:0 0 20px;color:#686963;line-height:1.55;">These consented calculator enquiries were saved before the visitor closed the browser.</p><table width="100%" style="border:1px solid #e8e7e1;border-collapse:collapse;"><tr style="background:#f7faf7;"><th style="padding:10px;text-align:left;font-size:12px;">#</th><th style="padding:10px;text-align:left;font-size:12px;">Contact</th><th style="padding:10px;text-align:left;font-size:12px;">Calculator</th><th style="padding:10px;text-align:left;font-size:12px;">Captured</th></tr>${rows}</table></td></tr><tr><td style="padding:16px 28px;background:#f0eee7;color:#686963;font-size:11px;">SA-BPO · Daily fallback delivery</td></tr></table></body></html>`;
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: SENDER, to: [RECIPIENT], reply_to: RECIPIENT, subject: `SA-BPO browser-close calculator report — ${items.length} ${items.length === 1 ? "visitor" : "visitors"}`, text, html }),
+  });
+  const apiResult = (await response.json().catch(() => null)) as ResendApiResponse | null;
+  if (!response.ok || !apiResult?.id) throw new Error("Digest email was not accepted");
+}
+
 export async function processCalculatorIntake(
   body: unknown,
   env: CalculatorEmailEnvironment,

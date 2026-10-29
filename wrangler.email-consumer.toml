@@ -14,5 +14,9 @@ max_batch_size = 10
 max_batch_timeout = 30
 max_retries = 5
 
+[triggers]
+# Cloudflare Cron uses UTC; 21:00 UTC is 23:00 SAST.
+crons = ["0 21 * * *"]
+
 [vars]
 # RESEND_API_KEY must be configured as an encrypted Worker secret, not here.

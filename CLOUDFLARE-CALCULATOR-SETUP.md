@@ -8,7 +8,7 @@ This implementation protects calculator submissions when a visitor closes the br
 Browser -> Pages Function /api/calculator-intake -> D1 -> Cloudflare Queue -> Worker -> Resend
 ```
 
-The Pages Function accepts both ordinary JSON requests and `sendBeacon()` requests (`text/plain`). The local outbox expires after 24 hours and is deleted after a successful API response. It is used only after calculator consent is given.
+The Pages Function accepts both ordinary JSON requests and `sendBeacon()` requests (`text/plain`). The local outbox expires after 24 hours and is deleted after a successful API response. It is used only after calculator consent is given. The consumer Worker also runs a free daily Cron fallback at 23:00 South Africa time. It groups older submissions still marked `queued` into one browser-close report email and marks them `sent` after Resend accepts the report.
 
 ## 1. Create the D1 database
 
@@ -70,6 +70,8 @@ From: SA-BPO Calculator <calculator@notifications.sa-bpo.com>
 To: partnerships@sa-bpo.co.za
 ```
 
+The daily fallback report is sent by the same Worker at 21:00 UTC (23:00 SAST). It covers consented submissions that reached D1 but were not processed by the Queue consumer. It waits one hour before including a row, which prevents a normal Queue delivery and the daily fallback from racing each other.
+
 ## 4. Configure Cloudflare Pages bindings
 
 In Cloudflare Dashboard:
@@ -126,4 +128,4 @@ A browser-close send cannot be guaranteed by browser APIs alone. The combination
 - `functions/api/calculator-intake.ts` — Cloudflare Pages Function with D1 and Queue support.
 - `migrations/0001_calculator_submissions.sql` — D1 schema and status index.
 - `workers/calculator-email-consumer.ts` — Queue consumer that sends through Resend.
-- `wrangler.email-consumer.toml` — Worker, D1, and Queue configuration.
+- `wrangler.email-consumer.toml` — Worker, D1, Queue, and daily Cron configuration.
