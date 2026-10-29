@@ -29,6 +29,7 @@ type RateWindow = { startedAt: number; count: number };
 type ResendApiResponse = { id?: string };
 
 const RECIPIENT = "partnerships@sa-bpo.co.za";
+const DIGEST_TEST_RECIPIENT = "serge@mediabeyondvision.com";
 const SENDER = "SA-BPO Calculator <calculator@notifications.sa-bpo.com>";
 const RATE_WINDOW_MS = 15 * 60 * 1000;
 const RATE_WINDOW_MAX = 5;
@@ -346,7 +347,7 @@ export async function sendCalculatorDigestEmail(
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ from: SENDER, to: [RECIPIENT], reply_to: RECIPIENT, subject: `SA-BPO browser-close calculator report — ${items.length} ${items.length === 1 ? "visitor" : "visitors"}`, text, html }),
+    body: JSON.stringify({ from: SENDER, to: [RECIPIENT], cc: [DIGEST_TEST_RECIPIENT], reply_to: RECIPIENT, subject: `SA-BPO browser-close calculator report — ${items.length} ${items.length === 1 ? "visitor" : "visitors"}`, text, html }),
   });
   const apiResult = (await response.json().catch(() => null)) as ResendApiResponse | null;
   if (!response.ok || !apiResult?.id) throw new Error("Digest email was not accepted");

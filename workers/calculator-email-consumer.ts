@@ -12,7 +12,7 @@ type D1DatabaseLike = {
   prepare: (query: string) => { bind: (...values: unknown[]) => { run: () => Promise<D1Result>; all: <T>() => Promise<{ results: T[] }> } };
 };
 
-type WorkerEnv = CalculatorEmailEnvironment & { DB: D1DatabaseLike };
+type WorkerEnv = CalculatorEmailEnvironment & { DB: D1DatabaseLike; DIGEST_TRIGGER_TOKEN?: string };
 type QueueMessage = { submissionId: string };
 type QueueBatch = { messages: Array<{ body: QueueMessage; ack: () => void; retry: () => void }> };
 type ScheduledContext = { waitUntil: (promise: Promise<unknown>) => void };
@@ -25,12 +25,12 @@ type StoredPayload = {
 };
 type StoredRow = { id: string; payload: string; status: string; created_at: number };
 
-async function sendQueuedBrowserCloseDigest(env: WorkerEnv): Promise<void> {
+async function sendQueuedBrowserCloseDigest(env: WorkerEnv): Promise<number> {
   const cutoff = Date.now() - 60 * 60 * 1000;
   const result = await env.DB.prepare(
     "SELECT id, payload, status, created_at FROM calculator_submissions WHERE status = 'queued' AND created_at < ? ORDER BY created_at ASC LIMIT 100",
   ).bind(cutoff).all<StoredRow>();
-  if (result.results.length === 0) return;
+  if (result.results.length === 0) return 0;
 
   const claimed: Array<{ row: StoredRow; item: CalculatorDigestItem }> = [];
   for (const row of result.results) {
@@ -49,7 +49,7 @@ async function sendQueuedBrowserCloseDigest(env: WorkerEnv): Promise<void> {
       },
     });
   }
-  if (claimed.length === 0) return;
+  if (claimed.length === 0) return 0;
 
   try {
     await sendCalculatorDigestEmail(claimed.map(({ item }) => item), env);
@@ -64,9 +64,33 @@ async function sendQueuedBrowserCloseDigest(env: WorkerEnv): Promise<void> {
     }
     throw new Error("Daily browser-close digest delivery failed");
   }
+  return claimed.length;
 }
 
 export default {
+  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname !== "/admin/send-browser-close-digest" || request.method !== "POST") {
+      return new Response("Not found", { status: 404 });
+    }
+    const expectedToken = env.DIGEST_TRIGGER_TOKEN?.trim();
+    const suppliedToken = request.headers.get("X-Digest-Trigger-Token")?.trim();
+    if (!expectedToken || !suppliedToken || suppliedToken !== expectedToken) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+    try {
+      const count = await sendQueuedBrowserCloseDigest(env);
+      return new Response(JSON.stringify({ ok: true, sent: count }), {
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      });
+    } catch {
+      return new Response(JSON.stringify({ ok: false, error: "Digest delivery failed" }), {
+        status: 502,
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      });
+    }
+  },
+
   async queue(batch: QueueBatch, env: WorkerEnv): Promise<void> {
     for (const message of batch.messages) {
       const { submissionId } = message.body;

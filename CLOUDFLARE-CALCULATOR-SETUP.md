@@ -70,7 +70,23 @@ From: SA-BPO Calculator <calculator@notifications.sa-bpo.com>
 To: partnerships@sa-bpo.co.za
 ```
 
-The daily fallback report is sent by the same Worker at 21:00 UTC (23:00 SAST). It covers consented submissions that reached D1 but were not processed by the Queue consumer. It waits one hour before including a row, which prevents a normal Queue delivery and the daily fallback from racing each other.
+The daily fallback report is sent by the same Worker at 21:00 UTC (23:00 SAST). It covers consented submissions that reached D1 but were not processed by the Queue consumer. It waits one hour before including a row, which prevents a normal Queue delivery and the daily fallback from racing each other. For testing, the digest also copies `serge@mediabeyondvision.com`; normal individual calculator emails are unchanged.
+
+## Manual digest trigger
+
+The Worker exposes a protected manual endpoint so an administrator can send the report immediately instead of waiting for 23:00. Add an encrypted Worker secret named `DIGEST_TRIGGER_TOKEN` under **Variables and Secrets**. Choose a long random value and do not place it in GitHub. After the Worker redeploys, send a `POST` request to:
+
+```text
+https://<your-worker-subdomain>.workers.dev/admin/send-browser-close-digest
+```
+
+Include this request header:
+
+```text
+X-Digest-Trigger-Token: <the-value-you-saved-as-DIGEST_TRIGGER_TOKEN>
+```
+
+The response reports how many queued submissions were sent. A response such as `{"ok":true,"sent":3}` means the three older queued rows were included and marked `sent`. The endpoint sends no email when there are no eligible queued rows.
 
 ## 4. Configure Cloudflare Pages bindings
 
